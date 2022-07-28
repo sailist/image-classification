@@ -1,0 +1,7 @@
+notion-potion
+lumo>=0.2.0
+dbrecord
+torchvision
+Pillow
+sklearn
+torch
