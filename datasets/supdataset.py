@@ -19,8 +19,8 @@ def get_train_dataset(dataset_name, method='default', split='train'):
 
     lazy_load = dataset_name in lazy_load_ds
 
-    if method == 'fixing':
-        img_size
+    # if method == 'fixing':
+    #     img_size
 
     ds = (
         DatasetBuilder()
@@ -63,5 +63,6 @@ def get_test_dataset(dataset_name):
     ds.add_output('xs', 'xs1', none(mean, std, size=img_size))
 
     return ds
+
 
 from torchvision.datasets import ImageFolder

@@ -83,10 +83,10 @@ class FTTrainer(SSLTrainer):
     def imodels(self, params: ParamsType):
         super().imodels(params)
         self.model = FTModule(params.model,
-                                feature_dim=params.feature_dim,
-                                hidden_size=params.hidden_feature_size,
-                                with_bn=params.with_bn,
-                                n_classes=params.n_classes)
+                              feature_dim=params.feature_dim,
+                              hidden_size=params.hidden_feature_size,
+                              with_bn=params.with_bn,
+                              n_classes=params.n_classes)
 
         self.optim = params.optim.build(self.model.parameters())
         self.to_device()

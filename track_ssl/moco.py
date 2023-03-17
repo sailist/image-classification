@@ -2,19 +2,21 @@
 # MoCo: Momentum Contrast for Unsupervised Visual Representation Learning
  - [paper](https://arxiv.org/abs/1911.05722)
  - [code]https://github.com/facebookresearch/moco (official)
+
+ - https://colab.research.google.com/github/facebookresearch/moco/blob/colab-notebook/colab/moco_cifar10_demo.ipynb#scrollTo=lzFyFnhbk8hj
 """
+
 from functools import partial
 
 import torch
 from lumo.contrib import EMA
 from lumo.contrib.nn.loss import contrastive_loss2
-from torch import nn
 from torch.nn import functional as F
-
-from models.components import MLP
-from models.module_utils import (pick_model_name,
-                                 ResnetOutput,
-                                 MemoryBank)
+from torch import nn
+from models.batch_shuffle import batch_shuffle_single_gpu, batch_unshuffle_single_gpu
+from models.components import MLP, SplitBatchNorm
+from models.memory_bank import MemoryBank
+from models.module_utils import pick_model_name
 from .ssltrainer import *
 
 
@@ -24,16 +26,18 @@ class MocoParams(SSLParams):
         super().__init__()
         self.method = 'moco'
         self.optim = self.OPTIM.create_optim('SGD',
-                                             lr=0.03,
-                                             weight_decay=1e-4,
+                                             lr=0.06,
+                                             weight_decay=5e-4,
                                              momentum=0.9)
-        self.queue_size = 16392  # 65535
-        self.temperature = 0.07
-        self.hidden_feature_size = 4096
-        self.with_bn = True
-        self.alpha = 0.9
-        self.contrast_th = 0.8
-        self.ema = True
+        self.train.batch_size = 512
+        self.queue_size = 4096  # 65535
+        self.temperature = 0.1
+        self.with_bn = False
+        self.ema_alpha = 0.99
+        self.hidden_feature_size = 512
+        self.feature_dim = 128
+        self.symmetric = False
+        self.warmup_epochs = 0
 
 
 ParamsType = MocoParams
@@ -49,12 +53,15 @@ class MocoModule(nn.Module):
                  detach_cls=True):
         super().__init__()
         self.backbone = pick_model_name(model_name)
+        SplitBatchNorm.convert_split_batchnorm(self.backbone, 8)
+
         input_dim = self.backbone.feature_dim
         self.feature_dim = feature_dim
-        self.head = MLP(input_dim,
-                        hidden_size,
-                        output_dim=feature_dim,
-                        with_bn=with_bn)
+        self.head = nn.Linear(input_dim, feature_dim, bias=True)
+        # self.head = MLP(input_dim,
+        #                 input_dim,
+        #                 output_dim=feature_dim,
+        #                 with_bn=with_bn)
         self.classifier = nn.Linear(input_dim, n_classes)
         self.detach_cls = detach_cls
 
@@ -76,6 +83,9 @@ class MocoModule(nn.Module):
 
 class MocoTrainer(SSLTrainer):
 
+    def to_feature(self, xs):
+        return self.model.forward(xs).feature
+
     def to_logits(self, xs):
         if self.params.ema:
             return self.ema_model.forward(xs).logits
@@ -90,38 +100,70 @@ class MocoTrainer(SSLTrainer):
                                 n_classes=params.n_classes)
 
         self.optim = params.optim.build(self.model.parameters())
-        self.to_device()
-        self.mb_feature = self.to_device(
-            MemoryBank(queue_size=params.queue_size, feature_dim=params.feature_dim)
-        )
+        self.mem = MemoryBank()
+        # do not need normalize because normalize is applied in contrastive_loss2 function
+        self.mem.register('negative', dim=params.feature_dim, k=params.queue_size)
+        self.mem['negative'] = F.normalize(self.mem['negative'], dim=-1)
 
         if params.ema:
-            self.ema_model = EMA(self.model, alpha=0.999)
+            self.ema_model = EMA(self.model, alpha=params.ema_alpha)
+
+        self.to_device()
 
     def train_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
+        if params.ema:
+            self.ema_model.step()
 
-        xs, ys = batch['xs'], batch['ys']
+        ys = batch['ys']
 
-        sxs0, sxs1 = batch['sxs0'], batch['sxs1']
+        im_query, im_key = batch['sxs0'], batch['sxs1']
 
-        output0 = self.model.forward(sxs0)
+        output_query = self.model.forward(im_query)
+
         with torch.no_grad():
-            output1 = self.ema_model.forward(sxs1)
-            key = output1.feature
-            self.mb_feature.push(key)
+            # shuffle for making use of BN
+            im_key_, idx_unshuffle = batch_shuffle_single_gpu(im_key)
 
-        logits = output0.logits
-        query = output0.feature
+            feat_key = self.ema_model.forward(im_key_).feature  # keys: NxC
+            feat_key = F.normalize(feat_key, dim=1)  # already normalized
 
-        Lcs = contrastive_loss2(query=query, key=key,
-                                memory=self.mb_feature,
-                                query_neg=False, key_neg=False,
-                                temperature=params.temperature,
-                                norm=True,
-                                eye_one_in_qk=False)
+            # undo shuffle
+            feat_key = batch_unshuffle_single_gpu(feat_key, idx_unshuffle)
+
+        logits = output_query.logits
+        feat_query = output_query.feature
+        feat_query = F.normalize(feat_query, dim=1)
+
+        if params.symmetric:
+            Lcsa = contrastive_loss2(query=feat_query, key=feat_key,
+                                     memory=self.mem['negative'],
+                                     query_neg=False, key_neg=False,
+                                     temperature=params.temperature,
+                                     norm=False)
+            Lcsb = contrastive_loss2(query=feat_key, key=feat_query,
+                                     memory=self.mem['negative'],
+                                     query_neg=False, key_neg=False,
+                                     temperature=params.temperature,
+                                     norm=False)
+            Lcs = Lcsa + Lcsb
+        else:
+
+            Lcs = contrastive_loss2(query=feat_query, key=feat_key.detach(),
+                                    memory=self.mem['negative'].clone().detach(),
+                                    query_neg=False, key_neg=False,
+                                    temperature=params.temperature,
+                                    norm=False)  # norm in function)
+
+        # memory bank
+        with torch.no_grad():
+            if params.symmetric:
+                self.mem.push('negative', torch.cat([feat_query, feat_key], dim=0))
+            else:
+                self.mem.push('negative', feat_key)
+
         Lx = 0
-        if params.train_linear:
+        if params.train_linear:  # train disconnect classifier
             Lx = F.cross_entropy(logits, ys)
 
         Lall = Lx + Lcs
@@ -130,14 +172,13 @@ class MocoTrainer(SSLTrainer):
         self.accelerate.backward(Lall)
         self.optim.step()
         cur_lr = self.lr_sche.apply(self.optim, self.global_steps)
-        if params.ema:
-            self.ema_model.step()
 
+        # metrics
         with torch.no_grad():
             meter.mean.Lall = Lall
             meter.mean.Lx = Lx
             meter.mean.Lcs = Lcs
-            meter.mean.Ax = (logits.argmax(dim=-1) == ys).float().mean()
+            meter.mean.Ax = torch.eq(logits.argmax(dim=-1), ys).float().mean()
             meter.last.lr = cur_lr
 
         return meter

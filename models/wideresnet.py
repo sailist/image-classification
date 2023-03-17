@@ -64,9 +64,9 @@ class BasicBlockPreAct(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
 
-class WideResnet(nn.Module):
+class WideResNet(nn.Module):
     def __init__(self, k=2, n=28, drop_rate=0):
-        super(WideResnet, self).__init__()
+        super(WideResNet, self).__init__()
         self.k, self.n = k, n
         assert (self.n - 4) % 6 == 0
         n_blocks = (self.n - 4) // 6  # =4
@@ -153,13 +153,13 @@ class WideResnet(nn.Module):
         return feat4
 
 
-class WideResnet4(nn.Module):
+class WideResNet4(nn.Module):
     """
     used for stl10
     """
 
     def __init__(self, k=2, n=28, drop_rate=0):
-        super(WideResnet4, self).__init__()
+        super(WideResNet4, self).__init__()
         self.k, self.n = k, n
         assert (self.n - 4) % 6 == 0
         n_blocks = (self.n - 4) // 6  # =4
@@ -261,7 +261,7 @@ if __name__ == "__main__":
     x = torch.randn(2, 3, 72, 32)
     lb = torch.randint(0, 10, (2,)).long()
 
-    net = WideResnet4(2, 28)
+    net = WideResNet4(2, 28)
     for n, m in net.named_parameters():
         print(n, m.data.numel())
     print(net)

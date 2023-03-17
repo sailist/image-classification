@@ -3,12 +3,13 @@ from pathlib import Path
 from joblib.memory import Memory
 from lumo.proc.path import cache_dir
 import os
+from lumo.proc import glob
 
 mem = Memory(location=os.path.join(cache_dir(), 'lumo.joblib'))
 
 roots = {
-    'tinyimagenet200': '/home/yanghaozhe/datasets/tiny-imagenet/tiny-imagenet-200',
-    'imagenet': '/home/yanghaozhe/datasets/imagenet',
+    'tinyimagenet200': glob.get('tinyimagenet200', os.path.join(cache_dir(), 'tinyimagenet200')),
+    'imagenet': glob.get('imagenet', os.path.join(cache_dir(), 'imagenet')),
 }
 
 
@@ -92,4 +93,51 @@ def imagenet(split='train'):
 
     return list(xs), list(ys)
 
-from torchvision.datasets import ImageFolder
+
+@mem.cache
+def imagenet2(split='train'):
+    """
+    This is another version of imagenet data when you have imagenet dataset with the format below (You can make it by the script provided here https://gist.github.com/BIGBALLON/8a71d225eff18d88e469e6ea9b39cef4 ):
+    #  train/
+    #  ├── n01440764
+    #  │   ├── n01440764_10026.JPEG
+    #  │   ├── n01440764_10027.JPEG
+    #  │   ├── ......
+    #  ├── ......
+    #  val/
+    #  ├── n01440764
+    #  │   ├── ILSVRC2012_val_00000293.JPEG
+    #  │   ├── ILSVRC2012_val_00002138.JPEG
+    #  │   ├── ......
+    #  ├── ......
+    #
+    """
+    root = roots['imagenet']
+    if split == 'train':
+        xs = []
+        ys = []
+        for sub_root, dirs, fs in os.walk(os.path.join(root, 'train')):
+            if len(fs) == 0:
+                continue
+            for f in fs:
+                if f.endswith('JPEG'):
+                    xs.append(os.path.join(sub_root, f))
+                    ys.append(os.path.basename(sub_root))
+
+        name_cls_map = {name: i for i, name in enumerate(sorted(set(ys)))}
+        ys = [name_cls_map[os.path.basename(os.path.dirname(i))] for i in xs]
+    else:
+        xs = []
+        ys = []
+        for sub_root, dirs, fs in os.walk(os.path.join(root, 'val')):
+            if len(fs) == 0:
+                continue
+            for f in fs:
+                if f.endswith('JPEG'):
+                    xs.append(os.path.join(sub_root, f))
+                    ys.append(os.path.basename(sub_root))
+
+        name_cls_map = {name: i for i, name in enumerate(sorted(set(ys)))}
+        ys = [name_cls_map[os.path.basename(os.path.dirname(i))] for i in xs]
+
+    return list(xs), list(ys)

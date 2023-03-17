@@ -16,5 +16,3 @@ wget http://vision.stanford.edu/aditya86/ImageNetDogs/README.txt
 kaggle competitions download -c dog-breed-identification
 ```
 """
-
-

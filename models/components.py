@@ -4,6 +4,8 @@ from torch.nn import functional as F
 
 
 class MLP(nn.Module):
+    """adapted from https://github.com/p3i0t/SimCLR-CIFAR10/blob/master/models.py"""
+
     def __init__(self,
                  feature_dim=128,
                  mid_dim=128,  # hidden_size
@@ -78,3 +80,41 @@ class ResidualLinear(nn.Module):
         out = self.linear(feature)
         out = out + feature
         return out
+
+
+class SplitBatchNorm(nn.BatchNorm2d):
+    def __init__(self, num_features, num_splits, **kw):
+        super().__init__(num_features, **kw)
+        self.num_splits = num_splits
+
+    def forward(self, input):
+        N, C, H, W = input.shape
+        if self.training or not self.track_running_stats:
+            running_mean_split = self.running_mean.repeat(self.num_splits)
+            running_var_split = self.running_var.repeat(self.num_splits)
+            outcome = nn.functional.batch_norm(
+                input.view(-1, C * self.num_splits, H, W), running_mean_split, running_var_split,
+                self.weight.repeat(self.num_splits), self.bias.repeat(self.num_splits),
+                True, self.momentum, self.eps).view(N, C, H, W)
+            self.running_mean.data.copy_(running_mean_split.view(self.num_splits, C).mean(dim=0))
+            self.running_var.data.copy_(running_var_split.view(self.num_splits, C).mean(dim=0))
+            return outcome
+        else:
+            return nn.functional.batch_norm(
+                input, self.running_mean, self.running_var,
+                self.weight, self.bias, False, self.momentum, self.eps)
+
+    @classmethod
+    def convert_split_batchnorm(cls, module, num_splits=None):
+        module_output = module
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module_output = SplitBatchNorm(module.num_features, num_splits=num_splits)
+            module_output.__dict__.update(module.__dict__)
+
+        for name, child in module.named_children():
+            module_output.add_module(
+                name, cls.convert_split_batchnorm(child, num_splits)
+            )
+        del module
+
+        return module_output

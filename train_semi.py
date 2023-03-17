@@ -15,7 +15,8 @@ from pkgutil import iter_modules
 
 methods = {i.name for i in list(iter_modules(track_semi.__path__))}
 
-if __name__ == '__main__':
+
+def main():
     params = SemiParams()
     params.module = None
     params.from_args()
@@ -25,3 +26,7 @@ if __name__ == '__main__':
         exit(1)
     module = importlib.import_module(f'track_semi.{params.module}')
     module.main()
+
+
+if __name__ == '__main__':
+    main()

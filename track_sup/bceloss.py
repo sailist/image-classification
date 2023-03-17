@@ -51,10 +51,9 @@ class BCEModule(nn.Module):
 class BCETrainer(SupTrainer):
 
     def to_logits(self, xs):
+        if self.params.ema:
+            return self.ema_model.forward(xs).logits
         return self.model.forward(xs).logits
-
-    def to_ema_logits(self, xs):
-        return self.ema_model.forward(xs).logits
 
     def imodels(self, params: ParamsType):
         super().imodels(params)

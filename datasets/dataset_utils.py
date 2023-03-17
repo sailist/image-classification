@@ -20,8 +20,10 @@ class DataParams(BaseParams):
             *list(const.n_classes.keys())
         )
         self.n_classes = 10
+        self.stl10_unlabeled = True
 
         self.train = DataloaderParams().from_kwargs(shuffle=True)
+        self.eval = DataloaderParams().from_kwargs(shuffle=True)
         self.test = DataloaderParams().from_kwargs(shuffle=False)
 
     def iparams(self):

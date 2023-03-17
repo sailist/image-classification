@@ -93,3 +93,39 @@ cifar100_coarse_label_map = {
     40: 5, 26: 13, 48: 18, 79: 13, 85: 19, 54: 2, 44: 15, 7: 7, 12: 9, 2: 14, 41: 19,
     37: 9, 13: 18, 25: 6, 10: 3, 57: 4, 5: 6, 60: 10, 91: 1, 3: 8, 58: 18, 16: 3,
 }
+
+cifar10_coarse_label_map = {
+
+    4: 0,  # deer
+    6: 0,  # frog
+    3: 0,  # cat
+    5: 0,  # dog
+    2: 0,  # bird
+
+    8: 1,  # ship
+    7: 1,  # horse
+    0: 1,  # airplane
+    9: 1,  # truck
+    1: 1,  # automobile
+}
+
+stl10_coarse_label_map = {
+    3: 0,  # cat
+    4: 0,  # deer
+    7: 0,  # monkey
+    5: 0,  # dog
+    1: 0,  # bird
+
+    2: 1,  # car
+    6: 1,  # horse
+    0: 1,  # airplane
+    8: 1,  # ship
+    9: 1,  # truck
+}
+
+coarse_label_map = {
+    'cifar10': cifar10_coarse_label_map,
+    'cifar100': cifar100_coarse_label_map,
+    'stl10': stl10_coarse_label_map,
+    'imagenet-200-blc': '',
+}

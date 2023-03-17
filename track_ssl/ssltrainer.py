@@ -1,13 +1,19 @@
-from typing import ClassVar
-
-import torch
+import json
+from typing import ClassVar, Union
 from torch import nn
-from lumo import Trainer, TrainerParams, Meter, callbacks, DataModule, MetricType, Record
+import torch
 from lumo import TrainStage
+from lumo import Trainer, TrainerParams, Meter, callbacks, DataModule, MetricType, Record
+from lumo.utils.device import send_to_device
+from lumo.data.loader import DataLoaderType
+from torch.nn import functional as F
 
-from models.module_utils import ModelParams, ResnetOutput
-from datasets.ssldataset import get_train_dataset, get_test_dataset
+from contrib.load_ssl_model import SSLLoadModel
 from datasets.dataset_utils import DataParams
+from datasets.ssldataset import get_train_dataset, get_test_dataset
+from models.knn import knn_predict
+from models.memory_bank import StorageBank
+from models.module_utils import ModelParams, ResnetOutput
 
 
 class SSLParams(TrainerParams, ModelParams, DataParams):
@@ -18,7 +24,10 @@ class SSLParams(TrainerParams, ModelParams, DataParams):
         self.method = None
 
         self.epoch = 500
-        self.batch_size = 512
+        self.train.batch_size = 512
+        self.test.batch_size = 512
+        self.eval.batch_size = 512
+
         self.optim = self.OPTIM.create_optim('Adam', lr=1e-3, weight_decay=1e-6)
 
         self.ema = True
@@ -47,16 +56,27 @@ class SSLParams(TrainerParams, ModelParams, DataParams):
         self.train_ending = 10
         self.pretrain_path = None
 
+        self.knn = True
+        self.knn_k = 200
+        self.knn_t = 0.1
+
+        self.linear_eval = False
+        self.semi_eval = False
+
     def iparams(self):
         super().iparams()
-        if self.dataset == 'stl10' and self.more_sample:
-            self.train_linear = False
 
 
 ParamsType = SSLParams
 
 
-class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
+class SSLTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
+
+    def imodels(self, params: ParamsType):
+        super().imodels(params)
+        self.tensors = StorageBank()
+        self.tensors.register('test_feature', dim=params.feature_dim, k=len(self.dm.test_dataset))
+        self.tensors.register('test_ys', dim=-1, k=len(self.dm.test_dataset), dtype=torch.long)
 
     def on_process_loader_begin(self, trainer: 'Trainer', func, params: ParamsType, dm: DataModule, stage: TrainStage,
                                 *args, **kwargs):
@@ -72,7 +92,7 @@ class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
                 self.lr_sche = params.SCHE.List([
                     params.SCHE.Linear(
                         start=params.warmup_from, end=params.optim.lr,
-                        left=1e-3,
+                        left=0,
                         right=len(self.train_dataloader) * params.warmup_epochs
                     ),
                     params.SCHE.Cos(
@@ -84,7 +104,7 @@ class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
             else:
                 self.lr_sche = params.SCHE.Cos(
                     start=params.optim.lr, end=params.lr_decay_end,
-                    left=1e-3,
+                    left=0,
                     right=len(self.train_dataloader) * params.epoch
                 )
             self.logger.info('create learning scheduler')
@@ -92,9 +112,10 @@ class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
 
     def icallbacks(self, params: ParamsType):
         super().icallbacks(params)
-        callbacks.EvalCallback(eval_per_epoch=-1, test_per_epoch=1).hook(self)
+        callbacks.EvalCallback(eval_per_epoch=-1, test_per_epoch=10).hook(self)
         callbacks.LoggerCallback(step_frequence=1, break_in=150).hook(self)
-        callbacks.AutoLoadModel().hook(self)
+        SSLLoadModel().hook(self)
+
         if isinstance(self, callbacks.BaseCallback):
             self.hook(self)
 
@@ -109,44 +130,72 @@ class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
     def to_feature(self, xs):
         raise NotImplementedError()
 
-    def to_feature_any_logits(self, xs):
-        raise NotImplementedError()
-
     def test_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
+        idx = batch['id']
         xs0 = batch['xs0']
         xs1 = batch['xs1']
         ys = batch['ys']
         logits0 = self.to_logits(xs0)
         logits1 = self.to_logits(xs1)
+        feature = self.to_feature(xs0)
+        feature = F.normalize(feature, dim=-1)
+        self.tensors.scatter('test_feature', feature, idx)
+        self.tensors.scatter('test_ys', ys, idx)
 
-        meter.sum.Acc0 = (logits0.argmax(dim=-1) == ys).sum()
-        meter.sum.Acc1 = (logits1.argmax(dim=-1) == ys).sum()
+        meter.sum.Acc0 = torch.eq(logits0.argmax(dim=-1), ys).sum()
+        meter.sum.Acc1 = torch.eq(logits1.argmax(dim=-1), ys).sum()
         meter.sum.C = xs0.shape[0]
         return meter
 
     @property
     def metric_step(self):
-        return self.global_step % 100 == 0
+        return self.global_steps % 100 == 0
 
-    def save_backbone(self):
-        model = getattr(self, 'model', None)
-        backbone = None  # type:nn.Module
-        if model is not None:
-            backbone = getattr(self.model, 'backbone', None)
-        if backbone is None:
-            self.logger.info('cannot get backbone from self.model')
-            return
-        sd = backbone.state_dict()
-        file = self.exp.blob_file(f'backbone_{self.global_step:06d}.pth', 'backbone_ckpts')
-        torch.save(sd, file)
-        self.logger.info(f'backbone saved in {file}')
-        return file
+    def on_train_begin(self, trainer: Trainer, func, params: ParamsType, dm: Union[DataModule, DataLoaderType] = None,
+                       arg_params: ParamsType = None, *args, **kwargs):
+        super().on_train_begin(trainer, func, params, dm, arg_params, *args, **kwargs)
+        self.acc = 0
 
-    def on_train_epoch_end(self, trainer: 'Trainer', func, params: ParamsType, record: Record, *args, **kwargs):
-        if params.eidx % 100 == 0:
-            self.save_model()
-            self.save_backbone()
+    def on_test_end(self, trainer: Trainer, func, params: ParamsType, record: Record = None, *args, **kwargs):
+        super().on_test_end(trainer, func, params, record, *args, **kwargs)
+        acc = record.agg()['Acc0']
+        self.metric.dump_metric('Acc', acc, cmp='max')
+        self.save_last_model()
+
+        @torch.no_grad()
+        def knn_test():
+            self.change_stage(TrainStage.val)
+            feature_bank = []
+            with torch.no_grad():
+                # generate feature bank
+                for batch in self.dm['memo']:
+                    batch = send_to_device(batch, self.device)
+                    data, target = batch['xs'], batch['ys']
+                    feature = self.to_feature(data)
+                    feature = F.normalize(feature, dim=1)
+                    feature_bank.append(feature)
+
+                feature_bank = torch.cat(feature_bank, dim=0).t().contiguous()
+                # [N]
+                feature_labels = torch.tensor(self.dm['memo'].dataset.inputs['ys'], device=feature_bank.device)
+                # loop test data to predict the label by weighted knn search
+
+                pred_labels = knn_predict(self.tensors['test_feature'],
+                                          feature_bank, feature_labels, params.n_classes, params.knn_k, params.knn_t)
+                total_num = pred_labels.shape[0]
+                total_top1 = torch.eq(pred_labels[:, 0], self.tensors['test_ys']).float().sum().item()
+
+            self.change_stage(TrainStage.train)
+            return total_top1 / total_num * 100
+
+        if params.knn:
+            knn_acc = knn_test()
+            max_knn_acc = self.metric.dump_metric('Knn', knn_acc, cmp='max', flush=True)
+            self.logger.info(f'Best Knn Top-1 acc: {max_knn_acc}, current: {knn_acc}')
+
+            if knn_acc >= max_knn_acc:
+                self.save_best_model()
 
 
 class SSLDM(DataModule):
@@ -155,33 +204,61 @@ class SSLDM(DataModule):
         super().idataloader(params, stage)
 
         if stage.is_train():
-            if params.dataset == 'stl10' and params.more_sample:
+            if params.dataset == 'stl10' and params.stl10_unlabeled:
                 split = 'train+unlabeled'
             else:
                 split = 'train'
-            dl = get_train_dataset(params.dataset,
+
+            ds = get_train_dataset(params.dataset,
                                    method=params.method, split=split)
 
+            dl = (
+                ds.DataLoader(batch_size=params.train.batch_size,
+                              num_workers=params.train.num_workers,
+                              shuffle=True,
+                              pin_memory=True, drop_last=True)
+            )
+
+            if params.dataset == 'stl10':
+                ds = get_train_dataset(params.dataset,
+                                       method=params.method, split='train')
+
+            # used for knn-eval
+            memo_dl = ds.DataLoader(batch_size=params.train.batch_size,
+                                    num_workers=params.train.num_workers,
+                                    drop_last=False, shuffle=False)
+            self.regist_dataloader(memo=memo_dl)
         elif stage.is_test():
-            dl = get_test_dataset(params.dataset)
+            ds = get_test_dataset(params.dataset)
+            dl = (
+                ds.DataLoader(batch_size=params.test.batch_size,
+                              num_workers=params.test.num_workers,
+                              pin_memory=True, drop_last=False)
+            )
         else:
             raise NotImplementedError()
         self.regist_dataloader_with_stage(stage, dl)
 
 
 def main(trainer_cls: ClassVar[Trainer], params_cls: ClassVar[ParamsType]):
-    params = params_cls()
+    params = params_cls()  # type: ParamsType
     params.from_args()
 
     dm = SSLDM()
-    trainer = trainer_cls(params, dm)
-
-    if params.pretrain_path is not None and params.train_linear:
-        trainer.load_state_dict(params.pretrain_path)
-        trainer.test()
-        return
+    trainer = trainer_cls(params, dm)  # type: SSLTrainer
 
     trainer.rnd.mark(params.seed)
     trainer.train()
-    trainer.save_model()
-    trainer.save_backbone()
+    trainer.save_last_model()
+
+    if params.linear_eval:
+        from track_ssl.linear import LinearEvalParams, LinearEvalTrainer
+        eval_params = LinearEvalParams()
+        eval_params.dataset = params.dataset
+        eval_params.model = params.model
+        eval_params.scan = 'linear-eval-' + params.get('scan', '')
+        eval_params.pretrain_path = trainer.exp.mk_bpath('models', 'best_model.ckpt')
+
+        eval_trainer = LinearEvalTrainer(eval_params, dm)
+        eval_trainer.train()
+        eval_trainer.test()

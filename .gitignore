@@ -159,6 +159,7 @@ repo.v1.json
 *.pkl
 .cache/
 .lumo/config.json
+.lumorc.json
 *.lumo.*
 *.ft
 kk

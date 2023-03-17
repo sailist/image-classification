@@ -13,14 +13,12 @@ from functools import partial
 import torch
 from lumo.contrib import EMA
 from lumo.contrib.nn.loss import contrastive_loss2
-from torch import nn
 from torch.nn import functional as F
 
 from models.components import MLP, MLP2
 from models.module_utils import (pick_model_name,
                                  ResnetOutput)
 from .ssltrainer import *
-from tricks import metric_knn
 
 
 class SimCLRParams(SSLParams):
@@ -30,12 +28,13 @@ class SimCLRParams(SSLParams):
         self.method = 'simclr'
         self.temperature = 0.5
         self.epoch = 1000
-        self.batch_size = 512
+        self.train.batch_size = 512
+        self.test.batch_size = 512
         self.warmup_epochs = 0
         self.hidden_feature_size = 128
-        self.optim = self.OPTIM.create_optim('SGD', lr=0.6, weight_decay=1e-6)
+        self.optim = self.OPTIM.create_optim('SGD', lr=0.6, momentum=0.9, weight_decay=1e-6)
 
-        self.with_bn = True
+        self.with_bn = False
 
 
 ParamsType = SimCLRParams
@@ -53,10 +52,10 @@ class SimCLRModule(nn.Module):
         self.backbone = pick_model_name(model_name)
         input_dim = self.backbone.feature_dim
         self.feature_dim = feature_dim
-        self.head = MLP2(input_dim,
-                         hidden_size,
-                         output_dim=feature_dim,
-                         with_bn=with_bn)
+        self.head = MLP(input_dim,
+                        hidden_size,
+                        output_dim=feature_dim,
+                        with_bn=with_bn)
         self.classifier = nn.Linear(input_dim, n_classes)
         self.detach_cls = detach_cls
 
@@ -77,6 +76,8 @@ class SimCLRModule(nn.Module):
 
 
 class SimCLRTrainer(SSLTrainer):
+    def to_feature(self, xs):
+        return self.model.forward(xs).feature
 
     def to_logits(self, xs):
         if self.params.ema:
@@ -100,7 +101,7 @@ class SimCLRTrainer(SSLTrainer):
     def train_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
 
-        xs, ys = batch['xs'], batch['ys']
+        ys = batch['ys']
 
         sxs0, sxs1 = batch['sxs0'], batch['sxs1']
 
@@ -139,7 +140,7 @@ class SimCLRTrainer(SSLTrainer):
             meter.mean.Lall = Lall
             meter.mean.Lx = Lx
             meter.mean.Lcs = Lcs
-            meter.mean.Ax = (logits.argmax(dim=-1) == ys).float().mean()
+            meter.mean.Ax = torch.eq(logits.argmax(dim=-1), ys).float().mean()
             meter.last.lr = cur_lr
             # meter.mean.Aknn = metric_knn(query, ys, 4)
 

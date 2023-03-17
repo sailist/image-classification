@@ -20,11 +20,10 @@ wget http://ai.stanford.edu/~jkrause/car196/cars_test_annos_withlabels.mat
 
 """
 
-
 import scipy.io
 
 from pathlib import Path
 
+
 def main(root):
     mat = scipy.io.loadmat('cardatasets/devkit/cars_meta.mat')
-

@@ -13,6 +13,7 @@ from PIL import Image
 
 PARAMETER_MAX = 10
 
+
 def AutoContrast(img, **kwarg):
     return PIL.ImageOps.autocontrast(img)
 

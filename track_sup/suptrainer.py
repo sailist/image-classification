@@ -2,9 +2,9 @@
 refer to
  - https://github.com/kuangliu/pytorch-cifar
 """
+from abc import ABC
 from typing import ClassVar
-import torch
-from torch.nn import functional as F
+
 from torch.utils.data import DataLoader
 
 from lumo import Trainer, TrainerParams, Meter, callbacks, DataModule, Record, MetricType, TrainStage
@@ -12,6 +12,7 @@ from lumo import Trainer, TrainerParams, Meter, callbacks, DataModule, Record, M
 from datasets.supdataset import get_train_dataset, get_test_dataset
 from models.module_utils import ModelParams
 from datasets.dataset_utils import DataParams
+import torch
 
 
 class SupParams(TrainerParams, ModelParams, DataParams):
@@ -37,14 +38,14 @@ class SupParams(TrainerParams, ModelParams, DataParams):
 ParamsType = SupParams
 
 
-class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
+class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback, ABC):
 
     def on_process_loader_begin(self, trainer: 'Trainer', func, params: ParamsType, dm: DataModule, stage: TrainStage,
                                 *args, **kwargs):
         super().on_process_loader_begin(trainer, func, params, dm, stage, *args, **kwargs)
-        if stage.is_train():
-            self.rnd.mark(params.seed)
-            self.logger.info(f'set seed {params.seed}')
+        self.rnd.mark(params.seed)
+        self.logger.info(f'set seed {params.seed}')
+        self.accuracy = []
 
     def on_process_loader_end(self, trainer: 'Trainer', func, params: ParamsType, loader: DataLoader, dm: DataModule,
                               stage: TrainStage, *args, **kwargs):
@@ -83,108 +84,29 @@ class SupTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
         super().icallbacks(params)
         callbacks.EvalCallback(eval_per_epoch=-1, test_per_epoch=1).hook(self)
         callbacks.LoggerCallback(step_frequence=1, break_in=150).hook(self)
-        callbacks.AutoLoadModel().hook(self)
-        # callbacks.EMAUpdate().hook(self)
         if isinstance(self, callbacks.BaseCallback):
             self.hook(self)
 
     def to_logits(self, xs):
         raise NotImplementedError()
 
-    def to_ema_logits(self, xs):
-        raise NotImplementedError()
-
-    def evaluate_step(self, batch, params: ParamsType = None) -> MetricType:
-        meter = Meter()
-        ys = batch['label']
-        logits = self.to_logits(batch)
-
-        if logits.ndim == 3:
-            meter.sum.Lall = F.cross_entropy(logits.permute(0, 2, 1), ys)
-        else:
-            meter.sum.Lall = F.cross_entropy(logits, ys)
-
-        meter.sum.Acc = torch.eq(logits.argmax(dim=-1), ys).sum()
-        if params.ema:
-            logits2 = self.to_ema_logits(batch)
-            meter.sum.Acc2 = torch.eq(logits2.argmax(dim=-1), ys).sum()
-        meter.sum.C = ys.shape[0]
-        return meter
-
     def test_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
-        ys = batch['label']
-        logits = self.to_logits(batch)
+        xs0 = batch['xs0']
+        xs1 = batch['xs1']
+        ys = batch['ys']
+        logits0 = self.to_logits(xs0)
+        logits1 = self.to_logits(xs1)
 
-        if params.get('confuse_matrix', False):
-            attention_mask = (ys >= 0)
-            self.true.extend(ys[attention_mask].cpu().numpy().tolist())
-            self.pred.extend(logits[attention_mask].argmax(dim=-1).cpu().numpy().tolist())
-
-        if logits.ndim == 3:
-            meter.sum.Lall = F.cross_entropy(logits.permute(0, 2, 1), ys)
-        else:
-            meter.sum.Lall = F.cross_entropy(logits, ys)
-
-        meter.sum.Acc = torch.eq(logits.argmax(dim=-1), ys).sum()
-        if params.ema:
-            logits2 = self.to_ema_logits(batch)
-            meter.sum.Acc2 = torch.eq(logits2.argmax(dim=-1), ys).sum()
+        meter.sum.Acc = torch.eq(logits0.argmax(dim=-1), ys).sum()
+        meter.sum.Acc1 = torch.eq(logits1.argmax(dim=-1), ys).sum()
         meter.sum.C = ys.shape[0]
         return meter
 
-    def on_eval_begin(self, trainer: 'Trainer', func, params: ParamsType, *args, **kwargs):
-        super().on_eval_begin(trainer, func, params, *args, **kwargs)
-        if self.is_main:
-            if params.get('confuse_matrix', False):
-                self.pred = []
-                self.true = []
-
-    def on_test_begin(self, trainer: 'Trainer', func, params: ParamsType, *args, **kwargs):
-        super().on_test_begin(trainer, func, params, *args, **kwargs)
-        if self.is_main:
-            if params.get('confuse_matrix', False):
-                self.pred = []
-                self.true = []
-
-    def on_test_end(self, trainer: 'Trainer', func, params: ParamsType, record: Record = None, *args, **kwargs):
+    def on_test_end(self, trainer: Trainer, func, params: ParamsType, record: Record = None, *args, **kwargs):
         super().on_test_end(trainer, func, params, record, *args, **kwargs)
-        if self.is_main:
-            if params.get('confuse_matrix', False):
-                from sklearn import metrics
-                if len(self.pred) > 0:
-                    cm = metrics.confusion_matrix(self.pred, self.true, labels=range(params.n_classes))
-                    self.logger.raw(cm)
-
-                    cls_pre, cls_rec, cls_f1, _ = metrics.precision_recall_fscore_support(
-                        self.true, self.pred
-                    )
-                    # cls_pre = {k: v for k, v in zip(params.class_names, cls_pre)}
-                    # cls_rec = {k: v for k, v in zip(params.class_names, cls_rec)}
-                    # cls_f1 = {k: v for k, v in zip(params.class_names, cls_f1)}
-
-                    accuracy = metrics.accuracy_score(self.true, self.pred)
-                    wa = metrics.balanced_accuracy_score(self.true, self.pred)
-                    precision = metrics.precision_score(self.true, self.pred, average='weighted')
-                    recall = metrics.recall_score(self.true, self.pred, average='weighted')
-                    wf1 = metrics.f1_score(self.true, self.pred, average='weighted')
-                    mif1 = metrics.f1_score(self.true, self.pred, average='micro')
-                    maf1 = metrics.f1_score(self.true, self.pred, average='macro')
-
-                    m = Meter()
-
-                    with self.database:
-                        m.update(self.database.update_metric_pair('pre', precision, 'cls_pre', cls_pre, compare='max'))
-                        m.update(self.database.update_metric_pair('rec', recall, 'cls_rec', cls_rec, compare='max'))
-                        m.update(self.database.update_metric_pair('f1', wf1, 'cls_f1', cls_f1, compare='max'))
-                        m.update(self.database.update_metrics(dict(acc=accuracy,
-                                                                   wa=wa,
-                                                                   mif1=mif1,
-                                                                   maf1=maf1),
-                                                              compare='max'))
-                        self.database.flush()
-
-                    self.logger.info('Best Results', m)
+        record.avg()
+        self.accuracy.extend([record.avg()['Acc'], record.avg()['Acc1']])
 
 
 class SupDM(DataModule):
@@ -194,11 +116,11 @@ class SupDM(DataModule):
             ds = get_train_dataset(params.dataset,
                                    method=params.method)
 
-            dl = ds.DataLoader(batch_size=params.batch_size, **params.train.to_dict())
+            dl = ds.DataLoader(**params.train.to_dict())
 
         else:
             ds = get_test_dataset(params.dataset)
-            dl = ds.DataLoader(batch_size=params.batch_size, **params.test.to_dict())
+            dl = ds.DataLoader(**params.test.to_dict())
         print(ds, stage)
 
         self.regist_dataloader_with_stage(stage, dl)
@@ -209,7 +131,7 @@ def main(trainer_cls: ClassVar[Trainer], params_cls: ClassVar[ParamsType]):
     params.from_args()
 
     dm = SupDM(params)
-    trainer = trainer_cls(params, dm)
+    trainer = trainer_cls(params, dm) # type: Trainer
 
     if params.pretrain_path is not None and params.train_linear:
         trainer.load_state_dict(params.pretrain_path)
@@ -221,4 +143,4 @@ def main(trainer_cls: ClassVar[Trainer], params_cls: ClassVar[ParamsType]):
 
     trainer.rnd.mark(params.seed)
     trainer.train()
-    trainer.save_model()
+    trainer.save_last_model()

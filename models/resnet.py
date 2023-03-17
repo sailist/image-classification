@@ -9,7 +9,6 @@ removed last fc layer
 import torch
 from torch import nn
 from torch import Tensor
-from torchvision.models.utils import load_state_dict_from_url
 from typing import Type, Any, Callable, Union, List, Optional
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50']
@@ -258,10 +257,6 @@ def _resnet(
         **kwargs: Any
 ) -> ResNet:
     model = ResNet(block, layers, **kwargs)
-    if pretrained:
-        state_dict = load_state_dict_from_url(model_urls[arch],
-                                              progress=progress)
-        model.load_state_dict(state_dict)
     return model
 
 

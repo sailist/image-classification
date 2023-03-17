@@ -15,24 +15,23 @@ def get_train_dataset(dataset_name, method='basic', split='train'):
 
     lazy_load = dataset_name in lazy_load_ds
 
-    ds = (
-        DatasetBuilder()
-            .add_idx('id')
-            .add_input('xs', xs)
-            .add_input('ys', ys)
-            .add_output('xs', 'xs', standard(mean, std, size=img_size))
-            .add_output('xs', 'xs1', standard(mean, std, size=img_size))
-            .add_output('xs', 'sxs0', simclr(mean, std, size=img_size))
-            .add_output('xs', 'sxs1', simclr(mean, std, size=img_size))
-            .add_output('ys', 'ys')
-    )
-
+    ds = DatasetBuilder()
+    (ds
+     .add_idx('id')
+     .add_input('xs', xs)
+     .add_input('ys', ys))
     if method == 'essl':
         ds.add_output('xs', 'xsu', rotate(mean, std, size=img_size // 2, v=0))
         ds.add_output('xs', 'xsd', rotate(mean, std, size=img_size // 2, v=180))
         ds.add_output('xs', 'xsl', rotate(mean, std, size=img_size // 2, v=90))
         ds.add_output('xs', 'xsr', rotate(mean, std, size=img_size // 2, v=-90))
-
+    else:
+        (ds
+         .add_output('xs', 'xs', none(mean, std, size=img_size))
+         .add_output('xs', 'sxs0', simclr(mean, std, size=img_size))
+         .add_output('xs', 'sxs1', simclr(mean, std, size=img_size))
+         .add_output('ys', 'ys')
+         )
     if lazy_load:
         ds.add_input_transform('xs', read)
 

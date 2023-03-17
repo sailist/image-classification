@@ -20,6 +20,7 @@ class ModelParams(BaseParams):
             'wrn282',
             'wrn288',
             'wrn372',
+            'preresnet18',
             'preresnet50',
         )
 
@@ -158,16 +159,20 @@ def pick_model_name(model_name) -> nn.Module:
         model = resnet_cifar.resnet50()
     elif model_name in {'stl10_resnet18'}:
         model = resnet_stl.resnet18()
-    elif model_name in {'resnet50'}:
-        model = resnet.resnet50()
     elif model_name in {'resnet34'}:
         model = resnet.resnet34()
+    elif model_name in {'resnet50'}:
+        model = resnet.resnet50()
     elif model_name in {'wrn282'}:
-        model = wideresnet.WideResnet(2, 28)
+        model = wideresnet.WideResNet(2, 28)
     elif model_name in {'wrn288'}:
-        model = wideresnet.WideResnet(8, 28)
+        model = wideresnet.WideResNet(8, 28)
     elif model_name in {'wrn372'}:
-        model = wideresnet.WideResnet4(2, 28)
+        model = wideresnet.WideResNet4(2, 28)
+    elif model_name in {'preresnet18'}:
+        model = preresnet.PreActResNet18()
+    elif model_name in {'preresnet34'}:
+        model = preresnet.PreActResNet34()
     elif model_name in {'preresnet50'}:
         model = preresnet.PreActResNet50()
     else:
