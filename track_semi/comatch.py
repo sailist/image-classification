@@ -7,19 +7,16 @@ refer to
 import math
 from functools import partial
 
-from lumo import MetricType
-from lumo.contrib.torch.tensor import onehot
 from lumo.contrib import EMA
 from lumo.contrib.nn.loss import contrastive_loss2
+from lumo.contrib.torch.tensor import onehot
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader
 
+from contrib.tensor import sharpen
 from models.components import MLP
 from models.module_utils import (pick_model_name,
-                                 ResnetOutput,
-                                 MemoryBank)
-from contrib.tensor import sharpen
+                                 ResnetOutput)
 from .semitrainer import *
 
 
@@ -54,14 +51,6 @@ class CoMatchParams(SemiParams):
 
 
 ParamsType = CoMatchParams
-
-
-class CoMatchLrSche(Params.SCHE.Cos):
-    """"""
-
-    def __call__(self, cur):
-        ratio = np.cos((7 * np.pi * cur) / (16 * self.right))
-        return self.start * ratio
 
 
 class CoMatchModule(nn.Module):
@@ -108,35 +97,7 @@ def init_weight(m):
         m.bias.data.zero_()
 
 
-#
-# def init_weight(m):
-#     if isinstance(m, nn.Conv2d):
-#         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-#         m.weight.data.normal_(0, math.sqrt(2. / n))
-#
-#         nn.init.kaiming_normal_(m.weight, a=0, mode='fan_in', nonlinearity='leaky_relu')
-#         if m.bias is not None:
-#             nn.init.constant_(m.bias, 0)
-#     elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
-#         m.weight.data.fill_(1)
-#         m.bias.data.zero_()
-#     elif isinstance(m, nn.Linear):
-#         nn.init.xavier_uniform_(m.weight.data)
-#         m.bias.data.zero_()
-#
-
 class CoMatchTrainer(SemiTrainer):
-
-    def on_process_loader_end(self, trainer: 'Trainer', func, params: ParamsType, loader: DataLoader, dm: DataModule,
-                              stage: TrainStage, *args, **kwargs):
-        if stage.is_train():
-            self.lr_sche = CoMatchLrSche(
-                start=params.optim.lr,
-                # end=0, # no need end
-                left=0,
-                right=len(self.train_dataloader) * params.epoch
-            )
-            self.logger.info(f'apply {self.lr_sche}')
 
     def to_logits(self, xs):
         if self.params.ema:
@@ -150,7 +111,6 @@ class CoMatchTrainer(SemiTrainer):
                                    feature_dim=params.feature_dim,
                                    with_bn=params.with_bn,
                                    n_classes=params.n_classes)
-        self.logger.info(list(self.model.parameters())[0][0])
         wd_params, non_wd_params = [], []
         for name, param in self.model.named_parameters():
             if 'bn' in name:
@@ -163,16 +123,22 @@ class CoMatchTrainer(SemiTrainer):
         self.optim = params.optim.build(param_list)
 
         self.optim = params.optim.build(self.model.parameters())
-        self.to_device()
+
         self.da_prob_list = []
-        self.mb_feature = (MemoryBank(params.batch_size * params.mu * params.queue_size,
-                                      params.feature_dim).to(self.accelerator.device))
-        self.mb_prob = (MemoryBank(params.batch_size * params.mu * params.queue_size, params.n_classes)
-                        .to(self.accelerator.device))
-        self.logger.info(f'memory bank size: {self.mb_feature.shape[0]}')
-        self.logger.info('accelerate.device', self.accelerator.device, self.params.get('device', None))
+        # self.mb_feature = (MemoryBank(params.batch_size * params.mu * params.queue_size,
+        #                               params.feature_dim).to(self.accelerator.device))
+
+        self.mem.register('mb_feature',
+                          dim=params.feature_dim,
+                          k=params.batch_size * params.mu * params.queue_size)
+        self.mem.register('mb_prob',
+                          dim=params.n_classes,
+                          k=params.batch_size * params.mu * params.queue_size)
+
         if params.ema:
             self.ema_model = EMA(self.model, alpha=0.999)
+
+        self.to_device()
 
     def train_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
@@ -216,12 +182,12 @@ class CoMatchTrainer(SemiTrainer):
 
         @torch.no_grad()
         def smooth_prob():
-            A = torch.exp(torch.mm(un_w_featrure, self.mb_feature.t()) / params.temperature)
+            A = torch.exp(torch.mm(un_w_featrure, self.mem['mb_feature'].t()) / params.temperature)
             A = A / A.sum(1, keepdim=True)
-            probs = params.alpha * un_w_probs + (1 - params.alpha) * torch.mm(A, self.mb_prob)
+            probs = params.alpha * un_w_probs + (1 - params.alpha) * torch.mm(A, self.mem['mb_prob'])
 
-            self.mb_feature.push(torch.cat([un_w_featrure, x_w_featrure]))
-            self.mb_prob.push(torch.cat([un_w_probs_ori, onehot(ys, params.n_classes)]))
+            self.mem.push('mb_feature', torch.cat([un_w_featrure, x_w_featrure]))
+            self.mem.push('mb_prob', torch.cat([un_w_probs_ori, onehot(ys, params.n_classes)]))
             return probs
 
         if params.apply_avg:
@@ -270,10 +236,10 @@ class CoMatchTrainer(SemiTrainer):
             meter.mean.Lx = Lx
             meter.mean.Lu = Lu
             meter.mean.Lcs = Lcs
-            meter.mean.Ax = (x_w_logits.argmax(dim=-1) == ys).float().mean()
-            meter.mean.Au = (un_w_logits.argmax(dim=-1) == metric_uys).float().mean()
+            meter.mean.Ax = torch.eq(x_w_logits.argmax(dim=-1), ys).float().mean()
+            meter.mean.Au = torch.eq(un_w_logits.argmax(dim=-1), metric_uys).float().mean()
             if p_mask.any():
-                meter.mean.Aum = (un_w_logits.argmax(dim=-1) == metric_uys)[p_mask].float().mean()
+                meter.mean.Aum = torch.eq(un_w_logits.argmax(dim=-1), metric_uys)[p_mask].float().mean()
                 meter.mean.um = p_mask.float().mean()
             if Q is not None:
                 label_graph = metric_uys.unsqueeze(0) == metric_uys.unsqueeze(1)

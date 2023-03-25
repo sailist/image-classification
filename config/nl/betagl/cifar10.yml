@@ -1,0 +1,4 @@
+dataset: cifar10
+epoch: 400
+model: preresnet18
+n_classes: 10

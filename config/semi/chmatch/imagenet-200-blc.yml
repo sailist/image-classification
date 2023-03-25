@@ -1,0 +1,11 @@
+dataset: imagenet-200-blc
+mu: 4
+batch_count: None
+epoch: 400
+min_proportion: 0.05
+max_proportion: 0.8
+k_inc_epoch: 100
+model: wrn288
+record_predict: False
+n_classes: 200
+c_classes: 20

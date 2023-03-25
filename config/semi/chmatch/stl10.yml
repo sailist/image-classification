@@ -1,0 +1,12 @@
+dataset: stl10
+mu: 7
+batch_count: 1024
+epoch: 1024
+min_proportion: 0.05
+max_proportion: 0.95
+k_inc_epoch: 100
+model: resnet18
+n_classes: 10
+c_classes: 2
+stl10_unlabeled: True
+n_percls: 100

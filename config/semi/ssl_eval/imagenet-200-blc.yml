@@ -1,0 +1,12 @@
+dataset: imagenet-200-blc
+mu: 4
+batch_count: 0
+epoch: 400
+qk_p: True
+filter_min: 0.05
+filter_max: 0.80
+right_bar: 0.100
+model: wrn288
+record_predict: False
+n_classes: 200
+c_classes: 20

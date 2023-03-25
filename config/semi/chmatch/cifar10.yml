@@ -1,0 +1,10 @@
+dataset: cifar10
+mu: 7
+batch_count: 1024
+epoch: 1024
+min_proportion: 0.05
+max_proportion: 0.95
+k_inc_epoch: 200
+model: wrn282
+n_classes: 10
+c_classes: 2

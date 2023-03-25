@@ -1,0 +1,27 @@
+seed, method , dataset , model , n_percls , error_rate , meta_info
+- , simclr , cifar10 , wrn282 , 4 , 61.05% , https://github.com/pytorch-lumo/image-classification/issues/6
+- , simclr , cifar10 , wrn282 , 25 , 36.03% , https://github.com/pytorch-lumo/image-classification/issues/7
+- , simclr , cifar10 , wrn282 , 100 , 24.23% , https://github.com/pytorch-lumo/image-classification/issues/11
+- , simclr , cifar100 , wrn282 , 4 , 82.93% , https://github.com/pytorch-lumo/image-classification/issues/8
+- , simclr , cifar100 , wrn282 , 25 , 58.46% , https://github.com/pytorch-lumo/image-classification/issues/9
+- , simclr , cifar100 , wrn282 , 100 , 39.90% , https://github.com/pytorch-lumo/image-classification/issues/12
+- , simclr , stl10 , resnet18 , 100 , 18.01% , https://github.com/pytorch-lumo/image-classification/issues/10
+- , chmatch, cifar10, wrn282, 4 (3 runs) , -, -
+- , chmatch, cifar10, wrn282, 25 (3 runs) , -, -
+- , chmatch, cifar10, wrn282, 100 (3 runs) , -, -
+0 , chmatch, cifar100, wrn282, 4 , -, https://github.com/sailist/image-classification/issues/18
+1 , chmatch, cifar100, wrn282, 4 , -, https://github.com/sailist/image-classification/issues/19
+2 , chmatch, cifar100, wrn282, 4 , -, https://github.com/sailist/image-classification/issues/20
+- , chmatch, cifar100, wrn282, 4 (3 runs) , 44.82±0.91, -
+0 , chmatch, cifar100, wrn282, 25 , -, https://github.com/sailist/image-classification/issues/21
+1 , chmatch, cifar100, wrn282, 25 , -, https://github.com/sailist/image-classification/issues/22
+2 , chmatch, cifar100, wrn282, 25 , -, https://github.com/sailist/image-classification/issues/23
+- , chmatch, cifar100, wrn282, 25 (3 runs) , 30.69±0.47, -
+0 , chmatch, cifar100, wrn282, 100 , -, https://github.com/sailist/image-classification/issues/24
+1 , chmatch, cifar100, wrn282, 100 , -, https://github.com/sailist/image-classification/issues/25
+2 , chmatch, cifar100, wrn282, 100 , -, https://github.com/sailist/image-classification/issues/26
+- , chmatch, cifar100, wrn282, 100 (3 runs) , 24.73±0.34, -
+0 , chmatch, stl10, resnet18, 100, 9.07%, https://github.com/sailist/image-classification/issues/27
+1 , chmatch, stl10, resnet18, 100, 10.18%, https://github.com/sailist/image-classification/issues/30
+2 , chmatch, stl10, resnet18, 100, 9.83%, https://github.com/sailist/image-classification/issues/29
+- , chmatch, stl10, resnet18, 100 (3 runs), 9.45%±0.38%, https://github.com/sailist/image-classification/issues/14

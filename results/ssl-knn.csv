@@ -1,0 +1,7 @@
+dataset, model, method, knn_result, meta_info
+cifar10, wrn282, simclr, 82.05, https://github.com/pytorch-lumo/image-classification/issues/2
+cifar100, wrn282, simclr, 53.42, https://github.com/pytorch-lumo/image-classification/issues/4
+stl10, resnet18, simclr, 83.41, https://github.com/pytorch-lumo/image-classification/issues/3
+cifar10, wrn282, moco, 85.97, -
+cifar100, wrn282, moco, 43.28, -
+stl10, resnet18, moco, 82.675, -

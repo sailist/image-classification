@@ -1,0 +1,7 @@
+dataset: cifar10
+mu: 1
+batch_count: 0
+epoch: 400
+model: wrn282
+n_classes: 10
+ema: False

@@ -1,0 +1,4 @@
+dataset: cifar100
+epoch: 400
+model: resnet34
+n_classes: 100

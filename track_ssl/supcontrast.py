@@ -71,6 +71,9 @@ class SupContrastModule(nn.Module):
 
 class SupContrastTrainer(SSLTrainer):
 
+    def to_feature(self, xs):
+        return self.model.forward(xs).feature
+
     def to_logits(self, xs):
         if self.params.ema:
             return self.ema_model.forward(xs).logits

@@ -25,6 +25,9 @@ class MixMatchParams(SemiParams):
         self.apply_da = True
         self.unloader_c = 1
 
+        self.sharpen = 0.5
+        self.mixup_beta = 0.5
+
 
 ParamsType = MixMatchParams
 

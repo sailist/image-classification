@@ -20,6 +20,7 @@ from lumo.proc.dist import is_main
 from torch.utils.data import RandomSampler
 
 from contrib.load_ssl_model import SSLLoadModel
+from contrib.sche import FixMatchLrSche
 from datasets.dataset_utils import DataParams
 from datasets.semidataset import get_train_dataset, get_test_dataset
 from models.memory_bank import MemoryBank, StorageBank
@@ -44,29 +45,22 @@ class SemiParams(TrainerParams, ModelParams, DataParams):
                                              nesterov=True)
         self.model = "wrn282"
         self.ema = True
+        self.lr_sche = self.choice('cos', 'fixmatch')
         self.n_percls = 4
 
         self.mu = 7
-        self.pseudo_thresh = 0.95
 
-        self.sharpen = 0.5
-        self.mixup_beta = 0.5
+        self.pseudo_thresh = 0.95
 
         self.pretrain = True
         self.pretrain_path = None
 
-        # extra metric
-        self.record_matrix = True
-
         # metric recording
+        self.record_matrix = True
         self.record_predict = True
-
-        self.with_coarse = False
 
     def iparams(self):
         super().iparams()
-        if self.dataset == "cifar100":
-            self.optim.weight_decay = 0.001
 
 
 ParamsType = SemiParams
@@ -84,6 +78,7 @@ class SemiTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
         self.tensors = StorageBank()
 
         ds_size = len(self.dm.train_dataset['un'])
+        self.ds_size = ds_size
         self.tensors.register('pys', -1, ds_size, dtype=torch.long)
         self.tensors.register('pscore', -1, ds_size)
         self.tensors.register('tys', -1, ds_size, dtype=torch.long)
@@ -154,12 +149,19 @@ class SemiTrainer(Trainer, callbacks.TrainCallback, callbacks.InitialCallback):
             **kwargs,
     ):
         if stage.is_train():
-            self.lr_sche = params.SCHE.Cos(
-                start=params.optim.lr,
-                end=params.optim.lr * 0.2,
-                left=0,
-                right=len(self.train_dataloader) * 1024,
-            )
+            if params.lr_sche == 'cos':
+                self.lr_sche = params.SCHE.Cos(
+                    start=params.optim.lr,
+                    end=params.optim.lr * 0.2,
+                    left=0,
+                    right=len(self.train_dataloader) * 1024,
+                )
+            else:
+                self.lr_sche = FixMatchLrSche(
+                    start=params.optim.lr,
+                    left=0,
+                    right=len(self.train_dataloader) * 1024,
+                )
             self.logger.info(f"apply {self.lr_sche}")
 
     def icallbacks(self, params: ParamsType):

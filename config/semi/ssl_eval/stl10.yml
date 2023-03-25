@@ -1,0 +1,9 @@
+dataset: stl10
+mu: 1
+batch_count: 0
+epoch: 400
+model: resnet18
+n_classes: 10
+stl10_unlabeled: False
+n_percls: 100
+ema: False

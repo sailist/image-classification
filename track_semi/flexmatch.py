@@ -5,13 +5,13 @@ refer to
 from collections import Counter
 from functools import partial
 
-from lumo import MetricType
 from lumo.contrib import EMA
-from torch.nn import functional as F
-from .semitrainer import *
 from torch import nn
+from torch.nn import functional as F
+
 from models.module_utils import (pick_model_name,
                                  ResnetOutput)
+from .semitrainer import *
 
 
 class FlexMatchParams(SemiParams):
@@ -71,21 +71,25 @@ class FlexMatchTrainer(SemiTrainer):
                                      n_classes=params.n_classes)
 
         self.optim = params.optim.build(self.model.parameters())
-
-        if params.dataset in {'cifar10', 'cifar100'}:
-            self.pseudo_label = torch.full((50000,), fill_value=-1,
-                                           device=self.device, dtype=torch.long)
-        elif params.dataset in {'stl10'}:
-            self.pseudo_label = torch.full((105000,), fill_value=-1,
-                                           device=self.device, dtype=torch.long)
-        else:
-            raise NotImplementedError()
+        self.tensors.register('flex_pys', -1, self.ds_size, dtype=torch.long)
+        # if params.dataset in {'cifar10', 'cifar100'}:
+        #     self.pseudo_label = torch.full((50000,), fill_value=-1,
+        #                                    device=self.device, dtype=torch.long)
+        # elif params.dataset in {'stl10'}:
+        #     self.pseudo_label = torch.full((105000,), fill_value=-1,
+        #                                    device=self.device, dtype=torch.long)
+        # else:
+        #     raise NotImplementedError()
 
         self.to_device()
         self.classwise_acc = None
         self.da_prob_list = []
         if params.ema:
             self.ema_model = EMA(self.model, alpha=0.999)
+
+    def on_process_loader_end(self, trainer: "Trainer", func, params: ParamsType, loader: DataLoaderType,
+                              dm: DataModule, stage: TrainStage, *args, **kwargs):
+        super().on_process_loader_end(trainer, func, params, loader, dm, stage, *args, **kwargs)
 
     def train_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
@@ -124,8 +128,9 @@ class FlexMatchTrainer(SemiTrainer):
 
         def calc_class_acc():
             classwise_acc = torch.zeros(params.n_classes, device=self.device, dtype=torch.float)
-            pseudo_counter = Counter(self.pseudo_label.tolist())
-            if max(pseudo_counter.values()) < len(self.pseudo_label):  # not all(5w) -1
+            pseudo_counter = Counter(self.tensors['flex_pys'].tolist())
+            # if max(pseudo_counter.values()) < self.ds_size:  # not all(5w) -1
+            if any(self.tensors['flex_pys'] != -1):
                 if not params.thresh_warmup:  # do not consider the count number of -1
                     if -1 in pseudo_counter.keys():
                         pseudo_counter.pop(-1)
@@ -147,7 +152,7 @@ class FlexMatchTrainer(SemiTrainer):
         p_mask = un_probs.ge(_pseudo_thresh)
 
         select_mask = un_probs.ge(params.pseudo_thresh)
-        self.pseudo_label[uids[select_mask]] = un_w_pys[select_mask]
+        self.tensors.scatter('flex_pys', un_w_pys[select_mask], uids[select_mask])
 
         if params.apply_nllce:
             _log_pred = F.log_softmax(un_s0_logits, dim=-1)
@@ -171,10 +176,10 @@ class FlexMatchTrainer(SemiTrainer):
             meter.mean.Lall = Lall
             meter.mean.Lx = Lx
             meter.mean.Lu = Lu
-            meter.mean.Ax = (x_w_logits.argmax(dim=-1) == ys).float().mean()
-            meter.mean.Au = (un_w_logits.argmax(dim=-1) == metric_uys).float().mean()
+            meter.mean.Ax = torch.eq(x_w_logits.argmax(dim=-1), ys).float().mean()
+            meter.mean.Au = torch.eq(un_w_logits.argmax(dim=-1), metric_uys).float().mean()
             if p_mask.any():
-                meter.mean.Aum = (un_w_logits.argmax(dim=-1) == metric_uys)[p_mask].float().mean()
+                meter.mean.Aum = torch.eq(un_w_logits.argmax(dim=-1), metric_uys)[p_mask].float().mean()
                 meter.mean.um = p_mask.float().mean()
 
         return meter
