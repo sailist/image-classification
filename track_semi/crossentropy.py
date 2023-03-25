@@ -72,8 +72,6 @@ class BaselineTrainer(SemiTrainer):
                                     n_classes=params.n_classes)
 
         self.optim = params.optim.build(self.model.parameters())
-        self.to_device()
-        self.da_prob_list = []
 
         if params.with_coarse:
             from datasets.const import coarse_label_map
@@ -86,6 +84,8 @@ class BaselineTrainer(SemiTrainer):
 
         if params.ema:
             self.ema_model = EMA(self.model, alpha=0.999)
+
+        self.to_device()
 
     def train_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()

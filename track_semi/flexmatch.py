@@ -72,20 +72,14 @@ class FlexMatchTrainer(SemiTrainer):
 
         self.optim = params.optim.build(self.model.parameters())
         self.tensors.register('flex_pys', -1, self.ds_size, dtype=torch.long)
-        # if params.dataset in {'cifar10', 'cifar100'}:
-        #     self.pseudo_label = torch.full((50000,), fill_value=-1,
-        #                                    device=self.device, dtype=torch.long)
-        # elif params.dataset in {'stl10'}:
-        #     self.pseudo_label = torch.full((105000,), fill_value=-1,
-        #                                    device=self.device, dtype=torch.long)
-        # else:
-        #     raise NotImplementedError()
 
-        self.to_device()
         self.classwise_acc = None
         self.da_prob_list = []
+
         if params.ema:
             self.ema_model = EMA(self.model, alpha=0.999)
+
+        self.to_device()
 
     def on_process_loader_end(self, trainer: "Trainer", func, params: ParamsType, loader: DataLoaderType,
                               dm: DataModule, stage: TrainStage, *args, **kwargs):

@@ -60,10 +60,11 @@ class FixMatchTrainer(SemiTrainer):
                                     n_classes=params.n_classes)
 
         self.optim = params.optim.build(self.model.parameters())
-        self.to_device()
         self.da_prob_list = []
         if params.ema:
             self.ema_model = EMA(self.model, alpha=0.999)
+
+        self.to_device()
 
     def train_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
@@ -89,6 +90,7 @@ class FixMatchTrainer(SemiTrainer):
             self.da_prob_list.append(probs.mean(0))
             if len(self.da_prob_list) > 32:
                 self.da_prob_list.pop(0)
+
             prob_avg = torch.stack(self.da_prob_list, dim=0).mean(0)
             probs = probs / prob_avg
             probs = probs / probs.sum(dim=1, keepdim=True)

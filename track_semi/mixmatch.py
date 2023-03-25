@@ -55,9 +55,11 @@ class MixMatchModule(nn.Module):
 class MixMatchTrainer(SemiTrainer):
 
     def to_logits(self, xs):
+        return self.model.forward(xs).logits
+
+    def to_ema_logits(self, xs):
         if self.params.ema:
             return self.ema_model.forward(xs).logits
-        return self.model.forward(xs).logits
 
     def imodels(self, params: ParamsType):
         super().imodels(params)
@@ -65,9 +67,9 @@ class MixMatchTrainer(SemiTrainer):
                                     n_classes=params.n_classes)
 
         self.optim = params.optim.build(self.model.parameters())
-        self.to_device()
         if params.ema:
             self.ema_model = EMA(self.model, alpha=0.999)
+        self.to_device()
 
     def train_step(self, batch, params: ParamsType = None) -> MetricType:
         meter = Meter()
