@@ -1,18 +1,16 @@
 from functools import partial
 
-import torch
-
-from lumo import MetricType
 from lumo.contrib import EMA
 from lumo.contrib.torch.tensor import onehot
-from .semitrainer import *
 from torch import nn
 from torch.nn import functional as F
+
+from contrib.tensor import sharpen, label_guesses, mixmatch_up
 from models.module_utils import (
     pick_model_name,
     ResnetOutput
 )
-from contrib.tensor import sharpen, label_guesses, mixmatch_up
+from .semitrainer import *
 
 
 class MixMatchParams(SemiParams):
@@ -79,7 +77,7 @@ class MixMatchTrainer(SemiTrainer):
         targets = onehot(ys, params.n_classes)
 
         uxs = [batch_un[f'xs{i}'] for i in range(params.k_size)]
-        metric_uys = batch_un['ys']
+        # metric_uys = batch_un['ys']
 
         sup_size = xs.shape[0]
 
@@ -108,7 +106,11 @@ class MixMatchTrainer(SemiTrainer):
         if params.ema:
             self.ema_model.step()
 
-        meter.mean.Lall = Lall
+        with torch.no_grad():
+            meter.mean.Lall = Lall
+            meter.mean.Lu = Lu
+            meter.mean.Lx = Lx
+
         return meter
 
 

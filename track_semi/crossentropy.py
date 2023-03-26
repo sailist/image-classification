@@ -1,6 +1,4 @@
 """
-refer to
- - https://github.com/kekmodel/FixMatch-pytorch
 """
 from functools import partial
 
