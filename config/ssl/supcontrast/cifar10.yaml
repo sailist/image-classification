@@ -1,0 +1,9 @@
+dataset: cifar10
+feature_dim: 128
+ema_alpha: 0.99
+temperature: 0.1
+optim:
+  name: SGD
+  lr: 0.06
+  weight_decay: 5e-4
+  momentum: 0.9

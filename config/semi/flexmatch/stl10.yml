@@ -1,0 +1,7 @@
+dataset: stl10
+mu: 7
+batch_count: 1024
+epoch: 1024
+model: resnet18
+n_classes: 10
+stl10_unlabeled: True

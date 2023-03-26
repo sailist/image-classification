@@ -1,0 +1,6 @@
+dataset: imagenet-200-blc
+mu: 4
+batch_count: None
+epoch: 400
+model: wrn288
+record_predict: False

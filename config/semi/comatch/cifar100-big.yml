@@ -1,0 +1,6 @@
+dataset: cifar100
+mu: 7
+batch_count: 1024
+epoch: 1024
+model: wrn288
+n_classes: 100
